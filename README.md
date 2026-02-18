@@ -36,6 +36,13 @@ npm run db:migrate:local
 npm run db:migrate
 ```
 
+**若你之前已建過舊版表**（沒有 `line_user_id`、`currency`、`occurred_at`、`payment_method_id`），請再執行延伸遷移（本機與遠端各一次，只需執行一次）：
+
+```bash
+npm run db:migrate:extend:local
+npm run db:migrate:extend
+```
+
 ---
 
 ## 部署

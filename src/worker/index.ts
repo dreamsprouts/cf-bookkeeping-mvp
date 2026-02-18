@@ -36,15 +36,19 @@ app.post("/webhook/line", async (c) => {
     return c.json({ error: "invalid signature" }, 401)
   }
 
-  const body = JSON.parse(rawBody) as {
-    events?: Array<{ type: string; replyToken?: string; message?: { type: string; text?: string } }>
+  type LineEv = {
+    type: string
+    replyToken?: string
+    message?: { type: string; text?: string }
+    source?: { type?: string; userId?: string }
   }
+  const body = JSON.parse(rawBody) as { events?: LineEv[] }
   const events = body.events ?? []
   const today = new Date().toISOString().slice(0, 10)
   await appendLog(c.env.DB, "webhook", "received", `events=${events.length}`)
 
   const messageEvents = events.filter(
-    (ev): ev is typeof ev & { replyToken: string; message: { text?: string } } =>
+    (ev): ev is LineEv & { replyToken: string; message: { text?: string } } =>
       ev.type === "message" && ev.message?.type === "text" && !!ev.replyToken
   )
 
@@ -59,8 +63,12 @@ app.post("/webhook/line", async (c) => {
           await appendLog(c.env.DB, "gemini", llm.intent, JSON.stringify(llm).slice(0, 300))
           if (llm.intent === "bookkeeping" && llm.entry) {
             const { date, category, amount, memo } = llm.entry
-            await c.env.DB.prepare("INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)")
-              .bind(date, category, amount, memo ?? null)
+            const lineUserId = (ev as LineEv).source?.userId ?? null
+            const occurredAt = `${date}T00:00:00`
+            await c.env.DB.prepare(
+              "INSERT INTO entries (date, category, amount, memo, line_user_id, currency, occurred_at, payment_method_id) VALUES (?, ?, ?, ?, ?, 'TWD', ?, 1)"
+            )
+              .bind(date, category, amount, memo ?? null, lineUserId, occurredAt)
               .run()
             replyText = llm.reply
           } else {
@@ -70,8 +78,12 @@ app.post("/webhook/line", async (c) => {
           const parsed = parseLineEntry(text)
           if (parsed) {
             const date = parsed.date ?? today
-            await c.env.DB.prepare("INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)")
-              .bind(date, parsed.category, parsed.amount, parsed.memo ?? null)
+            const lineUserId = (ev as LineEv).source?.userId ?? null
+            const occurredAt = `${date}T00:00:00`
+            await c.env.DB.prepare(
+              "INSERT INTO entries (date, category, amount, memo, line_user_id, currency, occurred_at, payment_method_id) VALUES (?, ?, ?, ?, ?, 'TWD', ?, 1)"
+            )
+              .bind(date, parsed.category, parsed.amount, parsed.memo ?? null, lineUserId, occurredAt)
               .run()
             replyText = `已記一筆：${date} ${parsed.category} ${parsed.amount} 元${parsed.memo ? " " + parsed.memo : ""}`
           } else {
@@ -140,28 +152,63 @@ app.post("/api/test-webhook", async (c) => {
   }
 })
 
+app.get("/api/payment-methods", async (c) => {
+  const { results } = await c.env.DB.prepare("SELECT id, name, type FROM payment_methods ORDER BY id").all()
+  return c.json(results)
+})
+
 app.get("/api/entries", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM entries ORDER BY created_at DESC").all()
   return c.json(results)
 })
 
 app.post("/api/entries", async (c) => {
-  const body = await c.req.json<{ date?: string; category?: string; amount?: number; memo?: string }>()
+  const body = await c.req.json<{
+    date?: string
+    category?: string
+    amount?: number
+    memo?: string
+    currency?: string
+    occurred_at?: string
+    payment_method_id?: number
+  }>()
   const date = body.date ?? new Date().toISOString().slice(0, 10)
   const category = body.category ?? "其他"
   const amount = Number(body.amount) || 0
   const memo = body.memo ?? null
-  await c.env.DB.prepare("INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)")
-    .bind(date, category, amount, memo)
+  const currency = (body.currency ?? "TWD").slice(0, 10)
+  const occurredAt = body.occurred_at ?? `${date}T00:00:00`
+  const paymentMethodId = Number(body.payment_method_id) || 1
+  await c.env.DB.prepare(
+    "INSERT INTO entries (date, category, amount, memo, currency, occurred_at, payment_method_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  )
+    .bind(date, category, amount, memo, currency, occurredAt, paymentMethodId)
     .run()
   return c.json({ ok: true })
 })
 
 app.put("/api/entries/:id", async (c) => {
   const id = c.req.param("id")
-  const body = await c.req.json<{ date?: string; category?: string; amount?: number; memo?: string }>()
-  await c.env.DB.prepare("UPDATE entries SET date=?, category=?, amount=?, memo=?, updated_at=datetime('now') WHERE id=?")
-    .bind(body.date ?? "", body.category ?? "", Number(body.amount) ?? 0, body.memo ?? null, id)
+  const body = await c.req.json<{
+    date?: string
+    category?: string
+    amount?: number
+    memo?: string
+    currency?: string
+    occurred_at?: string
+    payment_method_id?: number
+  }>()
+  const date = body.date ?? ""
+  const category = body.category ?? "其他"
+  const amount = Number(body.amount) ?? 0
+  const memo = body.memo ?? null
+  const currency = (body.currency ?? "TWD").slice(0, 10)
+  const occurredAt = body.occurred_at ?? null
+  const paymentMethodId = Number(body.payment_method_id) || 1
+  await c.env.DB.prepare(
+    "UPDATE entries SET date=?, category=?, amount=?, memo=?, currency=?, occurred_at=?, payment_method_id=?, updated_at=datetime('now') WHERE id=?"
+  )
+    .bind(date, category, amount, memo, currency, occurredAt, paymentMethodId, id)
     .run()
   return c.json({ ok: true })
 })

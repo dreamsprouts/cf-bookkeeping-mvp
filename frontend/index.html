@@ -36,12 +36,17 @@
       <h2 class="mb-4 text-lg font-semibold text-slate-800" id="form-title">新增一筆</h2>
       <form id="form" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-12">
         <input type="hidden" name="id" id="edit-id" value="">
-        <div class="sm:col-span-1 lg:col-span-3">
+        <div class="sm:col-span-1 lg:col-span-2">
           <label for="date" class="mb-1 block text-sm font-medium text-slate-600">日期</label>
           <input id="date" name="date" type="date" required
             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
         </div>
-        <div class="sm:col-span-1 lg:col-span-3">
+        <div class="sm:col-span-1 lg:col-span-2">
+          <label for="time" class="mb-1 block text-sm font-medium text-slate-600">時間</label>
+          <input id="time" name="time" type="time" value="00:00"
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div class="sm:col-span-1 lg:col-span-2">
           <label for="category" class="mb-1 block text-sm font-medium text-slate-600">類別</label>
           <select id="category" name="category"
             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
@@ -59,7 +64,21 @@
           <input id="amount" name="amount" type="number" min="0" step="1" placeholder="0" required
             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
         </div>
-        <div class="sm:col-span-2 lg:col-span-3">
+        <div class="sm:col-span-1 lg:col-span-2">
+          <label for="currency" class="mb-1 block text-sm font-medium text-slate-600">幣別</label>
+          <select id="currency" name="currency"
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+            <option value="TWD">TWD</option>
+          </select>
+        </div>
+        <div class="sm:col-span-1 lg:col-span-2">
+          <label for="payment_method_id" class="mb-1 block text-sm font-medium text-slate-600">支付方式</label>
+          <select id="payment_method_id" name="payment_method_id"
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+            <option value="1">錢包現金</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2 lg:col-span-2">
           <label for="memo" class="mb-1 block text-sm font-medium text-slate-600">備註</label>
           <input id="memo" name="memo" type="text" placeholder="選填"
             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
@@ -108,10 +127,34 @@
     const listEl = document.getElementById("list")
     const listEmpty = document.getElementById("list-empty")
     const listSummary = document.getElementById("list-summary")
+    let paymentMethods = [{ id: 1, name: "錢包現金", type: "cash" }]
 
     function todayStr() {
       const d = new Date()
       return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")
+    }
+
+    function occurredAtToDateTime(occurredAt, fallbackDate) {
+      if (!occurredAt || occurredAt.length < 10) return { date: fallbackDate || "", time: "00:00" }
+      const [datePart, timePart] = occurredAt.split("T")
+      const time = timePart ? timePart.slice(0, 5) : "00:00"
+      return { date: datePart || fallbackDate || "", time }
+    }
+
+    async function loadPaymentMethods() {
+      try {
+        const r = await fetch(API_BASE + "/api/payment-methods")
+        if (r.ok) {
+          paymentMethods = await r.json()
+          const sel = document.getElementById("payment_method_id")
+          sel.innerHTML = paymentMethods.map((pm) => '<option value="' + pm.id + '">' + escapeHtml(pm.name) + "</option>").join("")
+        }
+      } catch (_) {}
+    }
+
+    function pmName(id) {
+      const pm = paymentMethods.find((p) => Number(p.id) === Number(id))
+      return pm ? pm.name : "—"
     }
 
     async function load() {
@@ -128,16 +171,23 @@
           ? rows.map((e) => {
               const amount = Number(e.amount) || 0
               const isOut = amount >= 0
+              const dt = occurredAtToDateTime(e.occurred_at, e.date)
+              const dateTimeStr = dt.date + (dt.time && dt.time !== "00:00" ? " " + dt.time : "")
+              const sourceLabel = e.line_user_id ? "LINE" : "網頁"
+              const currency = e.currency || "TWD"
               return (
                 '<li class="flex flex-col gap-1 px-4 py-3 hover:bg-slate-50 sm:px-6 sm:flex-row sm:items-center sm:justify-between">' +
                   '<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">' +
-                    '<span class="font-medium text-slate-700">' + escapeHtml(e.date) + '</span>' +
+                    '<span class="font-medium text-slate-700">' + escapeHtml(dateTimeStr || e.date) + '</span>' +
                     '<span class="rounded bg-slate-100 px-2 py-0.5 text-sm text-slate-600">' + escapeHtml(e.category) + '</span>' +
+                    '<span class="text-xs text-slate-400">' + escapeHtml(pmName(e.payment_method_id)) + '</span>' +
+                    '<span class="text-xs text-slate-400">' + escapeHtml(currency) + '</span>' +
+                    '<span class="text-xs text-slate-400">' + escapeHtml(sourceLabel) + '</span>' +
                     (e.memo ? '<span class="text-sm text-slate-500">' + escapeHtml(e.memo) + '</span>' : '') +
                     '<span class="ml-auto font-semibold sm:ml-0 ' + (isOut ? 'amount-out' : 'amount-in') + '">' + formatAmount(amount) + '</span>' +
                   '</div>' +
                   '<div class="flex gap-2">' +
-                    '<button type="button" class="edit-btn rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-100" data-id="' + e.id + '" data-date="' + escapeHtml(e.date) + '" data-category="' + escapeHtml(e.category) + '" data-amount="' + escapeHtml(String(e.amount)) + '" data-memo="' + escapeHtml(e.memo || '') + '">編輯</button>' +
+                    '<button type="button" class="edit-btn rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-100" data-id="' + e.id + '" data-date="' + escapeHtml(dt.date || e.date) + '" data-time="' + (dt.time || "00:00") + '" data-category="' + escapeHtml(e.category) + '" data-amount="' + escapeHtml(String(e.amount)) + '" data-memo="' + escapeHtml(e.memo || '') + '" data-currency="' + escapeHtml(e.currency || 'TWD') + '" data-payment-method-id="' + (e.payment_method_id || 1) + '">編輯</button>' +
                   '</div>' +
                 '</li>'
               )
@@ -167,9 +217,12 @@
         btn.addEventListener("click", () => {
           editIdInput.value = btn.dataset.id
           document.getElementById("date").value = btn.dataset.date
+          document.getElementById("time").value = btn.dataset.time || "00:00"
           document.getElementById("category").value = btn.dataset.category
           document.getElementById("amount").value = btn.dataset.amount
           document.getElementById("memo").value = btn.dataset.memo || ""
+          document.getElementById("currency").value = btn.dataset.currency || "TWD"
+          document.getElementById("payment_method_id").value = btn.dataset.paymentMethodId || "1"
           formTitle.textContent = "編輯此筆"
           submitBtn.textContent = "儲存"
           cancelBtn.classList.remove("hidden")
@@ -181,11 +234,17 @@
       e.preventDefault()
       const fd = new FormData(form)
       const id = editIdInput.value.trim()
+      const date = fd.get("date")
+      const time = (fd.get("time") || "00:00").toString().slice(0, 5)
+      const occurred_at = date + "T" + time + ":00"
       const payload = {
-        date: fd.get("date"),
+        date,
         category: fd.get("category"),
         amount: Number(fd.get("amount")) || 0,
         memo: (fd.get("memo") || "").trim() || null,
+        currency: fd.get("currency") || "TWD",
+        occurred_at,
+        payment_method_id: Number(fd.get("payment_method_id")) || 1,
       }
       try {
         if (id) {
@@ -215,16 +274,19 @@
     function resetForm() {
       editIdInput.value = ""
       document.getElementById("date").value = todayStr()
+      document.getElementById("time").value = "00:00"
       document.getElementById("category").value = "餐飲"
       document.getElementById("amount").value = ""
       document.getElementById("memo").value = ""
+      document.getElementById("currency").value = "TWD"
+      document.getElementById("payment_method_id").value = "1"
       formTitle.textContent = "新增一筆"
       submitBtn.textContent = "送出"
       cancelBtn.classList.add("hidden")
     }
 
     document.getElementById("date").value = todayStr()
-    load()
+    loadPaymentMethods().then(load)
   </script>
 </body>
 </html>

@@ -9,7 +9,9 @@
     "deploy:frontend": "wrangler pages deploy frontend --project-name=cf-bookkeeping-mvp",
     "db:create": "wrangler d1 create cf-bookkeeping-db",
     "db:migrate": "wrangler d1 execute cf-bookkeeping-db --remote --file=./db/schema.sql",
-    "db:migrate:local": "wrangler d1 execute cf-bookkeeping-db --local --file=./db/schema.sql"
+"db:migrate:local": "wrangler d1 execute cf-bookkeeping-db --local --file=./db/schema.sql",
+    "db:migrate:extend": "wrangler d1 execute cf-bookkeeping-db --remote --file=./db/migrations/002_extend_entries.sql",
+    "db:migrate:extend:local": "wrangler d1 execute cf-bookkeeping-db --local --file=./db/migrations/002_extend_entries.sql"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
