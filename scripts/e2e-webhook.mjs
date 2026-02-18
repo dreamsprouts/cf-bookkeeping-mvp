@@ -23,17 +23,23 @@ async function waitForDev() {
 }
 
 async function runTest() {
-  const res = await fetch(`${BASE}/api/test-webhook`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: "奶茶 50" }),
-  })
-  const data = await res.json()
-  if (!data.ok || !data.reply) {
-    console.error("E2E 失敗:", data)
-    return false
+  const cases = [
+    { text: "奶茶 50", label: "記帳" },
+    { text: "嗨", label: "招呼" },
+  ]
+  for (const { text, label } of cases) {
+    const res = await fetch(`${BASE}/api/test-webhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+    const data = await res.json()
+    if (!data.ok || !data.reply || typeof data.reply !== "string") {
+      console.error(`E2E 失敗 [${label}] "${text}":`, data)
+      return false
+    }
+    console.log(`E2E 通過 [${label}] "${text}" →`, data.reply?.slice(0, 50))
   }
-  console.log("E2E 通過:", data.reply?.slice(0, 60))
   return true
 }
 
