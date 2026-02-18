@@ -88,7 +88,8 @@ npm run deploy:frontend
 ## 本機開發
 
 - 後端：`npm run dev` → API 在 http://localhost:8787  
-- 前端：直接開 `frontend/index.html`（會打線上 API），或用任意 static server 開 `frontend/`。  
+- 前端：RWD 記帳單頁（Tailwind），可新增／編輯流水帳。  
+  本機預覽：`npx serve frontend` 後開終端顯示的網址（預設打線上 API）。  
   若要在本機打本機 API，改 `frontend/index.html` 裡的 `API_BASE` 為 `http://localhost:8787` 即可。
 
 **後端 log 與測 Gemini：**

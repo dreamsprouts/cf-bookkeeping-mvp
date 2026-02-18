@@ -3,48 +3,227 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>記帳 MVP（前端）</title>
-</head>
-<body>
-  <h1>記帳 MVP — 前後端分離</h1>
-  <p>前端：Cloudflare Pages · 後端 API：Workers + D1</p>
-  <h2>新增一筆</h2>
-  <form id="form">
-    <input name="date" type="date" required>
-    <input name="category" placeholder="類別" value="餐飲">
-    <input name="amount" type="number" placeholder="金額" required>
-    <input name="memo" placeholder="備註">
-    <button type="submit">送出</button>
-  </form>
-  <h2>列表</h2>
-  <ul id="list"></ul>
+  <title>記帳本 — CF Bookkeeping</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>
-    // 後端 API 網址（Worker）
-    const API_BASE = "https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev"
-    async function load() {
-      const r = await fetch(API_BASE + "/api/entries")
-      const rows = await r.json()
-      const list = document.getElementById("list")
-      list.innerHTML = rows.length
-        ? rows.map(e => "<li>" + e.date + " " + e.category + " " + e.amount + " " + (e.memo || "") + "</li>").join("")
-        : "<li>尚無資料</li>"
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Noto Sans TC', 'sans-serif'] },
+        },
+      },
     }
-    document.getElementById("form").onsubmit = async (e) => {
-      e.preventDefault()
-      const fd = new FormData(e.target)
-      await fetch(API_BASE + "/api/entries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: fd.get("date"),
-          category: fd.get("category"),
-          amount: Number(fd.get("amount")),
-          memo: fd.get("memo") || null
+  </script>
+  <style>
+    body { font-family: 'Noto Sans TC', sans-serif; }
+    .amount-in { color: #059669; }
+    .amount-out { color: #dc2626; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800 antialiased">
+  <div class="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
+    <!-- Header -->
+    <header class="mb-8">
+      <h1 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">記帳本</h1>
+      <p class="mt-1 text-sm text-slate-500">Cloudflare Workers + D1 · 一鍵記帳、隨時查看</p>
+    </header>
+
+    <!-- Add / Edit form -->
+    <section class="mb-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <h2 class="mb-4 text-lg font-semibold text-slate-800" id="form-title">新增一筆</h2>
+      <form id="form" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-12">
+        <input type="hidden" name="id" id="edit-id" value="">
+        <div class="sm:col-span-1 lg:col-span-3">
+          <label for="date" class="mb-1 block text-sm font-medium text-slate-600">日期</label>
+          <input id="date" name="date" type="date" required
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div class="sm:col-span-1 lg:col-span-3">
+          <label for="category" class="mb-1 block text-sm font-medium text-slate-600">類別</label>
+          <select id="category" name="category"
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+            <option value="餐飲">餐飲</option>
+            <option value="交通">交通</option>
+            <option value="日用品">日用品</option>
+            <option value="娛樂">娛樂</option>
+            <option value="醫療">醫療</option>
+            <option value="教育">教育</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div class="sm:col-span-1 lg:col-span-2">
+          <label for="amount" class="mb-1 block text-sm font-medium text-slate-600">金額</label>
+          <input id="amount" name="amount" type="number" min="0" step="1" placeholder="0" required
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div class="sm:col-span-2 lg:col-span-3">
+          <label for="memo" class="mb-1 block text-sm font-medium text-slate-600">備註</label>
+          <input id="memo" name="memo" type="text" placeholder="選填"
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div class="flex items-end gap-2 sm:col-span-2 lg:col-span-1">
+          <button type="submit" id="submit-btn"
+            class="w-full rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+            送出
+          </button>
+          <button type="button" id="cancel-edit" class="hidden rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            取消
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Entries list -->
+    <section class="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-200 px-4 py-3 sm:px-6">
+        <h2 class="text-lg font-semibold text-slate-800">流水帳</h2>
+        <p class="mt-0.5 text-sm text-slate-500" id="list-summary">載入中…</p>
+      </div>
+      <div class="overflow-x-auto">
+        <ul id="list" class="divide-y divide-slate-100">
+          <!-- filled by JS -->
+        </ul>
+      </div>
+      <div id="list-empty" class="hidden px-4 py-12 text-center text-slate-500 sm:px-6">
+        尚無紀錄，從上方表單新增一筆吧。
+      </div>
+    </section>
+
+    <footer class="mt-8 text-center text-xs text-slate-400">
+      CF Bookkeeping MVP · 前端 Pages · 後端 Workers + D1
+    </footer>
+  </div>
+
+  <script>
+    const API_BASE = "https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev"
+
+    const form = document.getElementById("form")
+    const formTitle = document.getElementById("form-title")
+    const submitBtn = document.getElementById("submit-btn")
+    const cancelBtn = document.getElementById("cancel-edit")
+    const editIdInput = document.getElementById("edit-id")
+    const listEl = document.getElementById("list")
+    const listEmpty = document.getElementById("list-empty")
+    const listSummary = document.getElementById("list-summary")
+
+    function todayStr() {
+      const d = new Date()
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")
+    }
+
+    async function load() {
+      try {
+        const r = await fetch(API_BASE + "/api/entries")
+        if (!r.ok) throw new Error(r.statusText)
+        const rows = await r.json()
+        const total = rows.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+        listSummary.textContent = rows.length ? `共 ${rows.length} 筆 · 合計 ${formatAmount(total)} 元` : "尚無紀錄"
+        listEmpty.classList.toggle("hidden", rows.length > 0)
+        listEl.classList.toggle("hidden", rows.length === 0)
+
+        listEl.innerHTML = rows.length
+          ? rows.map((e) => {
+              const amount = Number(e.amount) || 0
+              const isOut = amount >= 0
+              return (
+                '<li class="flex flex-col gap-1 px-4 py-3 hover:bg-slate-50 sm:px-6 sm:flex-row sm:items-center sm:justify-between">' +
+                  '<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">' +
+                    '<span class="font-medium text-slate-700">' + escapeHtml(e.date) + '</span>' +
+                    '<span class="rounded bg-slate-100 px-2 py-0.5 text-sm text-slate-600">' + escapeHtml(e.category) + '</span>' +
+                    (e.memo ? '<span class="text-sm text-slate-500">' + escapeHtml(e.memo) + '</span>' : '') +
+                    '<span class="ml-auto font-semibold sm:ml-0 ' + (isOut ? 'amount-out' : 'amount-in') + '">' + formatAmount(amount) + '</span>' +
+                  '</div>' +
+                  '<div class="flex gap-2">' +
+                    '<button type="button" class="edit-btn rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-100" data-id="' + e.id + '" data-date="' + escapeHtml(e.date) + '" data-category="' + escapeHtml(e.category) + '" data-amount="' + escapeHtml(String(e.amount)) + '" data-memo="' + escapeHtml(e.memo || '') + '">編輯</button>' +
+                  '</div>' +
+                '</li>'
+              )
+            }).join("")
+          : ""
+        bindEditButtons()
+      } catch (err) {
+        listSummary.textContent = "無法載入：" + (err.message || "網路錯誤")
+        listEmpty.classList.add("hidden")
+        listEl.classList.remove("hidden")
+        listEl.innerHTML = '<li class="px-4 py-6 text-center text-red-600 sm:px-6">請確認後端 API 可連線</li>'
+      }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement("div")
+      div.textContent = s
+      return div.innerHTML
+    }
+
+    function formatAmount(n) {
+      return Number(n).toLocaleString("zh-TW", { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+    }
+
+    function bindEditButtons() {
+      listEl.querySelectorAll(".edit-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          editIdInput.value = btn.dataset.id
+          document.getElementById("date").value = btn.dataset.date
+          document.getElementById("category").value = btn.dataset.category
+          document.getElementById("amount").value = btn.dataset.amount
+          document.getElementById("memo").value = btn.dataset.memo || ""
+          formTitle.textContent = "編輯此筆"
+          submitBtn.textContent = "儲存"
+          cancelBtn.classList.remove("hidden")
         })
       })
-      load()
-      e.target.reset()
     }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault()
+      const fd = new FormData(form)
+      const id = editIdInput.value.trim()
+      const payload = {
+        date: fd.get("date"),
+        category: fd.get("category"),
+        amount: Number(fd.get("amount")) || 0,
+        memo: (fd.get("memo") || "").trim() || null,
+      }
+      try {
+        if (id) {
+          const r = await fetch(API_BASE + "/api/entries/" + id, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+          if (!r.ok) throw new Error(r.statusText)
+        } else {
+          const r = await fetch(API_BASE + "/api/entries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+          if (!r.ok) throw new Error(r.statusText)
+        }
+        resetForm()
+        load()
+      } catch (err) {
+        alert("儲存失敗：" + (err.message || "請稍後再試"))
+      }
+    })
+
+    cancelBtn.addEventListener("click", resetForm)
+
+    function resetForm() {
+      editIdInput.value = ""
+      document.getElementById("date").value = todayStr()
+      document.getElementById("category").value = "餐飲"
+      document.getElementById("amount").value = ""
+      document.getElementById("memo").value = ""
+      formTitle.textContent = "新增一筆"
+      submitBtn.textContent = "送出"
+      cancelBtn.classList.add("hidden")
+    }
+
+    document.getElementById("date").value = todayStr()
     load()
   </script>
 </body>
