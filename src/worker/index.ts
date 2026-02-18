@@ -48,11 +48,25 @@ reply：用一句「像真人」的簡短回覆。記帳時要根據用戶寫的
     contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n用戶說：${userMessage}` }] }],
     generationConfig: { responseMimeType: "application/json" },
   }
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
+  const GEMINI_TIMEOUT_MS = 15000
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (e) {
+    clearTimeout(timeoutId)
+    if ((e as Error).name === "AbortError") {
+      return { intent: "other", reply: "[錯誤] 處理逾時，請再試一次" }
+    }
+    throw e
+  }
+  clearTimeout(timeoutId)
   const raw = await res.text()
   if (!res.ok) {
     console.error("[Gemini] API error", res.status, raw.slice(0, 500))
@@ -221,6 +235,36 @@ app.get("/api/test-gemini", async (c) => {
   try {
     const result = await callGemini(c.env.GEMINI_API_KEY, "奶茶 50", today)
     return c.json({ ok: true, result, today })
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: errMsg }, 500)
+  }
+})
+
+// 本機 E2E：跑完整流程（同 webhook 邏輯），測通再上線。POST body: { "text": "奶茶 50" }
+app.post("/api/test-webhook", async (c) => {
+  if (!c.env.GEMINI_API_KEY) {
+    return c.json({ ok: false, error: "GEMINI_API_KEY 未設定" }, 500)
+  }
+  const today = new Date().toISOString().slice(0, 10)
+  let body: { text?: string }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ ok: false, error: "body 需為 JSON，含 text" }, 400)
+  }
+  const text = (body.text ?? "").trim() || "奶茶 50"
+  try {
+    const llm = await callGemini(c.env.GEMINI_API_KEY, text, today)
+    const reply = llm?.intent === "bookkeeping" && llm.entry
+      ? llm.reply
+      : (llm?.reply ?? "收到，有需要記帳跟我說～")
+    return c.json({
+      ok: true,
+      reply,
+      intent: llm?.intent ?? null,
+      entry: llm?.intent === "bookkeeping" ? llm.entry : null,
+    })
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : String(e)
     return c.json({ ok: false, error: errMsg }, 500)

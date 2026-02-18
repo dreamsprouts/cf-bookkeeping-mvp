@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:e2e": "node scripts/e2e-webhook.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:frontend": "wrangler pages deploy frontend --project-name=cf-bookkeeping-mvp",
