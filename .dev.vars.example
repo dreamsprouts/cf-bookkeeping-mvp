@@ -3,3 +3,6 @@
 
 LINE_CHANNEL_SECRET=你的_channel_secret
 LINE_CHANNEL_ACCESS_TOKEN=你的_channel_access_token
+
+# 選填。有設定的話 LINE 訊息會先經 Gemini 判斷意圖再回覆（記帳則寫入 D1 + 人性化回覆）
+GEMINI_API_KEY=你的_gemini_api_key

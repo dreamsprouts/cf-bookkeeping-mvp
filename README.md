@@ -93,9 +93,9 @@ npm run deploy:frontend
 
 ---
 
-## LINE 接通（不經 LLM）
+## LINE 接通
 
-Bot 接收**特定格式**的訊息後，解析成標準格式寫入 D1 並回覆。
+Bot 接收用戶訊息後：**有設定 Gemini API key 時**，一律經 LLM 判斷意圖（記帳則寫入 D1 + 人性化回覆；其餘則只回人性化訊息）；**未設定時**則僅支援固定格式解析並寫入 D1。
 
 ---
 
@@ -146,7 +146,7 @@ https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev/webhook/line
 - `類別 金額 [備註]`  
   例：`餐飲 120 午餐`、`交通 50`
 - 可選開頭加日期：`YYYY-MM-DD 類別 金額 [備註]`  
-  例：`2024-02-18 娛樂 300 電影`
+  例：`2026-02-18 娛樂 300 電影`
 
 **類別**限用：餐飲、交通、日用品、娛樂、醫療、教育、其他。  
 格式不符時 Bot 會回覆格式說明。
@@ -154,7 +154,24 @@ https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev/webhook/line
 **設定密鑰：**
 
 - **Production（Workers）**：在專案目錄執行  
-  `wrangler secret set LINE_CHANNEL_SECRET`、  
-  `wrangler secret set LINE_CHANNEL_ACCESS_TOKEN`  
+  `wrangler secret put LINE_CHANNEL_SECRET`、  
+  `wrangler secret put LINE_CHANNEL_ACCESS_TOKEN`  
   依提示貼上 Channel secret 與 Channel access token（Messaging API 頁籤）。
 - **本機**：複製 `.dev.vars.example` 為 `.dev.vars`，填入上述兩項（不要 commit `.dev.vars`）。
+
+### Gemini 設定（選填，啟用 LLM 回覆）
+
+1. **取得 API key**  
+   - 開啟 [Google AI Studio](https://aistudio.google.com/) → 登入 Google 帳號。  
+   - 左側或上方選 **「Get API key」／「取得 API 金鑰」**。  
+   - 建立或選擇專案後，點 **Create API key**，複製金鑰。
+
+2. **設定到 Worker**  
+   - **Production**：在專案目錄執行  
+     `wrangler secret put GEMINI_API_KEY`  
+     依提示貼上剛才複製的 API key。  
+   - **本機**：在 `.dev.vars` 加上一行  
+     `GEMINI_API_KEY=你的_gemini_api_key`  
+     （可參考 `.dev.vars.example`。）
+
+設定完成後，LINE 訊息會改由 Gemini 判斷意圖並回覆人性化內容；未設定則維持固定格式解析。
