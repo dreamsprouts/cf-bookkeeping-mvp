@@ -23,14 +23,13 @@ app.use("/*", cors({ origin: "*" }))
 
 // ---------- Gemini：意圖判斷 + 記帳欄位 + 人性化回覆 ----------
 async function callGemini(apiKey: string, userMessage: string, today: string): Promise<LlmResult | null> {
-  const systemPrompt = `你是記帳 LINE Bot 的助手。根據用戶訊息判斷意圖，並回傳「僅一行」的 JSON，不要 markdown 或註解。
+  const systemPrompt = `你是記帳 LINE Bot。用戶訊息「只要有提到金額且能推測用途」就當成記帳，intent 填 "bookkeeping"。
+類別「必須」從這七個選一個：${CATEGORIES.join("、")}。對應範例：買書/書籍/誠品書→教育；吃飯/午餐/咖啡→餐飲；車票/捷運/加油→交通；電影/遊戲→娛樂；藥/看診→醫療；日常用品→日用品；其餘→其他。
+entry：date 用 YYYY-MM-DD（沒寫就用 ${today}）、category 從上面七選一、amount 從訊息抓數字、memo 可選（如「誠品買書」）。
+reply 一句給用戶的人性化回覆，記帳就說已幫你記下。
 
-規則：
-1. 若用戶在記一筆支出（有金額、可推得類別或備註），intent 為 "bookkeeping"，並填 entry：date(YYYY-MM-DD，缺則用 ${today})、category(限：${CATEGORIES.join("、")})、amount(數字)、memo(可選)。
-2. 其餘（問候、問功能、閒聊、無法辨識為記帳）intent 為 "other"，不需 entry。
-3. reply 一律填一句給用戶的「人性化回覆」：記帳成功就簡短確認；非記帳就簡短友善回覆。
-
-回傳格式（任一種）：
+只回傳「一行」JSON，不要 markdown 或註解。
+格式二選一：
 {"intent":"bookkeeping","entry":{"date":"...","category":"...","amount":123,"memo":"..."},"reply":"..."}
 {"intent":"other","reply":"..."}`
 
@@ -44,20 +43,38 @@ async function callGemini(apiKey: string, userMessage: string, today: string): P
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) return null
-  const data = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+  const raw = await res.text()
+  if (!res.ok) {
+    console.error("[Gemini] API error", res.status, raw.slice(0, 500))
+    return null
+  }
+  let data: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
+  try {
+    data = JSON.parse(raw) as typeof data
+  } catch (e) {
+    console.error("[Gemini] response not JSON", raw.slice(0, 300), e)
+    return null
   }
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-  if (!text) return null
+  if (!text) {
+    console.warn("[Gemini] no text in response", JSON.stringify(data).slice(0, 400))
+    return null
+  }
+  console.log("[Gemini] raw", text.slice(0, 400))
   try {
     const parsed = JSON.parse(text) as LlmResult
     if (parsed.intent === "bookkeeping" && parsed.entry && CATEGORIES.includes(parsed.entry.category) && Number(parsed.entry.amount) > 0) {
+      console.log("[Gemini] ok bookkeeping", parsed.entry)
       return parsed
     }
-    if (parsed.intent === "other" && typeof parsed.reply === "string") return parsed
+    if (parsed.intent === "other" && typeof parsed.reply === "string") {
+      console.log("[Gemini] ok other", parsed.reply?.slice(0, 80))
+      return parsed
+    }
+    console.warn("[Gemini] validation failed", { intent: parsed.intent, category: parsed.entry?.category, amount: parsed.entry?.amount })
     return { intent: "other", reply: parsed.reply ?? "收到，有需要記帳跟我說～" }
-  } catch {
+  } catch (e) {
+    console.error("[Gemini] JSON parse fail", text.slice(0, 200), e)
     return { intent: "other", reply: "剛剛沒解析成功，再講一次或用：類別 金額 備註" }
   }
 }
@@ -100,6 +117,7 @@ app.post("/webhook/line", async (c) => {
   for (const ev of events) {
     if (ev.type !== "message" || ev.message?.type !== "text" || !ev.replyToken) continue
     const text = (ev.message.text ?? "").trim()
+    console.log("[LINE] user:", text)
     let replyText: string
     if (c.env.GEMINI_API_KEY) {
       const llm = await callGemini(c.env.GEMINI_API_KEY, text, today)
@@ -113,6 +131,7 @@ app.post("/webhook/line", async (c) => {
         replyText = llm.reply
       } else {
         replyText = llm?.reply ?? "收到，有需要記帳跟我說～"
+        if (!llm) console.warn("[LINE] Gemini returned null, using fallback reply")
       }
     } else {
       const parsed = parseLineEntry(text)
@@ -128,6 +147,7 @@ app.post("/webhook/line", async (c) => {
         replyText = "格式：類別 金額 [備註]\n類別可填：餐飲、交通、日用品、娛樂、醫療、教育、其他\n例：餐飲 120 午餐"
       }
     }
+    console.log("[LINE] reply:", replyText.slice(0, 80))
     await fetch("https://api.line.me/v2/bot/message/reply", {
       method: "POST",
       headers: {

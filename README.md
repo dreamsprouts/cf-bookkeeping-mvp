@@ -175,3 +175,5 @@ https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev/webhook/line
      （可參考 `.dev.vars.example`。）
 
 設定完成後，LINE 訊息會改由 Gemini 判斷意圖並回覆人性化內容；未設定則維持固定格式解析。
+
+**除錯（正式站）**：在專案目錄執行 `npx wrangler tail`，再用 LINE 傳一則訊息，終端會即時印出 `[LINE] user:`、`[Gemini]` 的 log（API 錯誤、回傳 JSON、是否判成記帳等），方便排查。
