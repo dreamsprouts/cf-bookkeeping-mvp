@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>記帳 MVP（前端）</title>
+</head>
+<body>
+  <h1>記帳 MVP — 前後端分離</h1>
+  <p>前端：Cloudflare Pages · 後端 API：Workers + D1</p>
+  <h2>新增一筆</h2>
+  <form id="form">
+    <input name="date" type="date" required>
+    <input name="category" placeholder="類別" value="餐飲">
+    <input name="amount" type="number" placeholder="金額" required>
+    <input name="memo" placeholder="備註">
+    <button type="submit">送出</button>
+  </form>
+  <h2>列表</h2>
+  <ul id="list"></ul>
+  <script>
+    // 後端 API 網址（Worker）
+    const API_BASE = "https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev"
+    async function load() {
+      const r = await fetch(API_BASE + "/api/entries")
+      const rows = await r.json()
+      const list = document.getElementById("list")
+      list.innerHTML = rows.length
+        ? rows.map(e => "<li>" + e.date + " " + e.category + " " + e.amount + " " + (e.memo || "") + "</li>").join("")
+        : "<li>尚無資料</li>"
+    }
+    document.getElementById("form").onsubmit = async (e) => {
+      e.preventDefault()
+      const fd = new FormData(e.target)
+      await fetch(API_BASE + "/api/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: fd.get("date"),
+          category: fd.get("category"),
+          amount: Number(fd.get("amount")),
+          memo: fd.get("memo") || null
+        })
+      })
+      load()
+      e.target.reset()
+    }
+    load()
+  </script>
+</body>
+</html>

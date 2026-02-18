@@ -1,0 +1,5 @@
+# 複製成 .dev.vars 並填入真實值（不要 commit .dev.vars）
+# 本機 npm run dev 時會讀取
+
+LINE_CHANNEL_SECRET=你的_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=你的_channel_access_token

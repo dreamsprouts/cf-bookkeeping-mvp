@@ -1,0 +1,21 @@
+{
+  "name": "cf-bookkeeping-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:frontend": "wrangler pages deploy frontend --project-name=cf-bookkeeping-mvp",
+    "db:create": "wrangler d1 create cf-bookkeeping-db",
+    "db:migrate": "wrangler d1 execute cf-bookkeeping-db --remote --file=./db/schema.sql",
+    "db:migrate:local": "wrangler d1 execute cf-bookkeeping-db --local --file=./db/schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.3.0",
+    "wrangler": "^3.91.0"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  }
+}
