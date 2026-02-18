@@ -21,6 +21,16 @@ const app = new Hono<{ Bindings: Env }>()
 
 app.use("/*", cors({ origin: "*" }))
 
+async function appendLog(db: D1Database, level: string, message: string, meta?: string) {
+  try {
+    await db.prepare("INSERT INTO logs (level, message, meta) VALUES (?, ?, ?)")
+      .bind(level, message, (meta ?? "").slice(0, 1000))
+      .run()
+  } catch (e) {
+    console.error("[appendLog]", e)
+  }
+}
+
 // ---------- Gemini：意圖判斷 + 記帳欄位 + 人性化回覆 ----------
 async function callGemini(apiKey: string, userMessage: string, today: string): Promise<LlmResult | null> {
   const systemPrompt = `你是記帳 LINE Bot。規則：只要用戶訊息裡「有數字（金額）」且能推測花費項目，一律當記帳，intent 填 "bookkeeping"，不要填 "other"。
@@ -114,40 +124,50 @@ app.post("/webhook/line", async (c) => {
   const body = JSON.parse(rawBody) as { events?: Array<{ type: string; replyToken?: string; message?: { type: string; text?: string } }> }
   const events = body.events ?? []
   const today = new Date().toISOString().slice(0, 10)
+  await appendLog(c.env.DB, "webhook", "received", `events=${events.length}`)
   for (const ev of events) {
     if (ev.type !== "message" || ev.message?.type !== "text" || !ev.replyToken) continue
     const text = (ev.message.text ?? "").trim()
-    console.log("[LINE] user:", text)
-    let replyText: string
-    if (c.env.GEMINI_API_KEY) {
-      const llm = await callGemini(c.env.GEMINI_API_KEY, text, today)
-      if (llm?.intent === "bookkeeping" && llm.entry) {
-        const { date, category, amount, memo } = llm.entry
-        await c.env.DB.prepare(
-          "INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)"
-        )
-          .bind(date, category, amount, memo ?? null)
-          .run()
-        replyText = llm.reply
+    let replyText = ""
+    try {
+      await appendLog(c.env.DB, "line", "user", text.slice(0, 200))
+      if (c.env.GEMINI_API_KEY) {
+        const llm = await callGemini(c.env.GEMINI_API_KEY, text, today)
+        await appendLog(c.env.DB, "gemini", llm ? (llm.intent === "bookkeeping" ? "bookkeeping" : "other") : "null", llm ? JSON.stringify(llm).slice(0, 300) : "")
+        if (llm?.intent === "bookkeeping" && llm.entry) {
+          const { date, category, amount, memo } = llm.entry
+          await c.env.DB.prepare(
+            "INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)"
+          )
+            .bind(date, category, amount, memo ?? null)
+            .run()
+          replyText = llm.reply
+        } else {
+          replyText = llm?.reply ?? "收到，有需要記帳跟我說～"
+        }
       } else {
-        replyText = llm?.reply ?? "收到，有需要記帳跟我說～"
+        const parsed = parseLineEntry(text)
+        if (parsed) {
+          const date = parsed.date ?? today
+          await c.env.DB.prepare(
+            "INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)"
+          )
+            .bind(date, parsed.category, parsed.amount, parsed.memo ?? null)
+            .run()
+          replyText = `已記一筆：${date} ${parsed.category} ${parsed.amount} 元${parsed.memo ? " " + parsed.memo : ""}`
+        } else {
+          replyText = "格式：類別 金額 [備註]\n類別可填：餐飲、交通、日用品、娛樂、醫療、教育、其他\n例：餐飲 120 午餐"
+        }
       }
-    } else {
-      const parsed = parseLineEntry(text)
-      if (parsed) {
-        const date = parsed.date ?? today
-        await c.env.DB.prepare(
-          "INSERT INTO entries (date, category, amount, memo) VALUES (?, ?, ?, ?)"
-        )
-          .bind(date, parsed.category, parsed.amount, parsed.memo ?? null)
-          .run()
-        replyText = `已記一筆：${date} ${parsed.category} ${parsed.amount} 元${parsed.memo ? " " + parsed.memo : ""}`
-      } else {
-        replyText = "格式：類別 金額 [備註]\n類別可填：餐飲、交通、日用品、娛樂、醫療、教育、其他\n例：餐飲 120 午餐"
-      }
+      replyText = replyText.slice(0, 500)
+      await appendLog(c.env.DB, "line", "reply", replyText.slice(0, 200))
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e)
+      await appendLog(c.env.DB, "error", errMsg, (e instanceof Error ? (e.stack ?? "") : "").slice(0, 500))
+      replyText = "[錯誤] 伺服器異常，請稍後再試"
     }
-    console.log("[LINE] reply:", replyText.slice(0, 80))
-    await fetch("https://api.line.me/v2/bot/message/reply", {
+    if (!replyText) replyText = "[錯誤] 伺服器異常，請稍後再試"
+    const replyRes = await fetch("https://api.line.me/v2/bot/message/reply", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${c.env.LINE_CHANNEL_ACCESS_TOKEN}`,
@@ -155,6 +175,9 @@ app.post("/webhook/line", async (c) => {
       },
       body: JSON.stringify({ replyToken: ev.replyToken, messages: [{ type: "text", text: replyText }] }),
     })
+    if (!replyRes.ok) {
+      await appendLog(c.env.DB, "error", "LINE reply failed", `${replyRes.status} ${await replyRes.text()}`)
+    }
   }
   return c.json({ ok: true })
 })
@@ -178,6 +201,32 @@ function parseLineEntry(text: string): { date?: string; category: string; amount
 }
 
 // ---------- API ----------
+// 查 log（後端介面，方便排查 webhook / Gemini）
+app.get("/api/logs", async (c) => {
+  const limit = Math.min(Number(c.req.query("limit")) || 100, 200)
+  const { results } = await c.env.DB.prepare(
+    "SELECT id, created_at, level, message, meta FROM logs ORDER BY id DESC LIMIT ?"
+  )
+    .bind(limit)
+    .all()
+  return c.json(results)
+})
+
+// 測通 Gemini：GET 此 URL 會用「奶茶 50」呼叫 Gemini 並回傳結果
+app.get("/api/test-gemini", async (c) => {
+  if (!c.env.GEMINI_API_KEY) {
+    return c.json({ ok: false, error: "GEMINI_API_KEY 未設定" }, 500)
+  }
+  const today = new Date().toISOString().slice(0, 10)
+  try {
+    const result = await callGemini(c.env.GEMINI_API_KEY, "奶茶 50", today)
+    return c.json({ ok: true, result, today })
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e)
+    return c.json({ ok: false, error: errMsg }, 500)
+  }
+})
+
 // 列出所有筆
 app.get("/api/entries", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM entries ORDER BY created_at DESC").all()

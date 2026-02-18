@@ -91,6 +91,11 @@ npm run deploy:frontend
 - 前端：直接開 `frontend/index.html`（會打線上 API），或用任意 static server 開 `frontend/`。  
   若要在本機打本機 API，改 `frontend/index.html` 裡的 `API_BASE` 為 `http://localhost:8787` 即可。
 
+**後端 log 與測 Gemini：**
+
+- **`GET /api/logs`**：查最近寫入 D1 的 log（webhook 收到、Gemini 呼叫結果、LINE 回覆、錯誤）。開瀏覽器或 curl 打 `https://cf-bookkeeping-mvp.morris-dreamsprouts.workers.dev/api/logs` 即可看。
+- **`GET /api/test-gemini`**：用「奶茶 50」呼叫 Gemini，回傳 JSON。打此 URL 可確認 Gemini 是否通、回傳格式是否正確。
+
 ---
 
 ## LINE 接通
